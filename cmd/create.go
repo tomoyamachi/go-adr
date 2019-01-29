@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tomoyamachi/go-adr/models"
-	//"github.com/tomoyamachi/go-adr/models"
 )
 
 // outputCmd represents output golang file for future-architect/vuls
@@ -33,7 +32,6 @@ func init() {
 }
 
 func createAdr(cmd *cobra.Command, args []string) (err error) {
-	fmt.Printf("%v", args)
 	status := viper.GetString("status")
 	filename := strings.Join(args, "_")
 	user, err := user.Current()
@@ -57,6 +55,8 @@ func createAdr(cmd *cobra.Command, args []string) (err error) {
 	}
 	defer f.Close()
 	tmpl.Execute(f, adr)
+
+	fmt.Print("Create " + outputFile)
 	return nil
 }
 
