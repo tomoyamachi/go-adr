@@ -13,7 +13,6 @@ import (
 	"github.com/tomoyamachi/go-adr/models"
 )
 
-// outputCmd represents output golang file for future-architect/vuls
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create ADR template",
