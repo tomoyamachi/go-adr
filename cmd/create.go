@@ -32,6 +32,10 @@ func init() {
 
 func createAdr(cmd *cobra.Command, args []string) (err error) {
 	status := viper.GetString("status")
+	if err = models.CheckStatus(status); err != nil {
+		return err
+	}
+
 	filename := strings.Join(args, "_")
 	user, err := user.Current()
 	if err != nil {
@@ -43,7 +47,7 @@ func createAdr(cmd *cobra.Command, args []string) (err error) {
 		Author: user.Username,
 		Status: status,
 	}
-	tmpl, err := template.New("adr").Parse(templateAdr)
+	tmpl, err := template.New("adr").Parse(createAdrTemplate())
 	if err != nil {
 		return err
 	}
@@ -59,30 +63,25 @@ func createAdr(cmd *cobra.Command, args []string) (err error) {
 	return nil
 }
 
-const templateAdr = `
-# {{.Title}}
-
+func createAdrTemplate() string {
+	return `# {{.Title}}
 {{.Author}}
 
-## Status
-
+## ` + models.StatusHeader + `
 {{.Status}}
 
-## History
-
-| Date | Status | Memo |
-|--|--|--|
-| {{.Date}} | {{.Status}} | create this file |
+## ` + models.HistoryHeader + `
+Date | Status | Memo 
+---|---|---
+{{.Date}} | {{.Status}} | create this file
 
 ## Context
-
 > what is the issue that we're seeing that is motivating this decision or change.
 
 ## Decision
-
 > what is the change that we're actually proposing or doing.
 
 ## Consequences
-
 > what becomes easier or more difficult to do because of this change.
 `
+}

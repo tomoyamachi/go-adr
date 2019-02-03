@@ -2,15 +2,22 @@ package renderer
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+
+	"github.com/tomoyamachi/go-adr/models"
 
 	. "gopkg.in/russross/blackfriday.v2"
 )
 
 // MarkdownRenderer is a type that implements the Renderer interface for Markdown output.
 type MarkdownRenderer struct {
-	w             bytes.Buffer
-	lastOutputLen int
+	w                  bytes.Buffer
+	newHistory         *models.History
+	lastOutputLen      int
+	tableHeadCount     int
+	firstTableCell     bool
+	currentHeaderTitle string
 }
 
 var (
@@ -28,7 +35,8 @@ var (
 	olTag             = []byte("1.")
 	nestLiTag         = []byte("  ")
 	hrTag             = []byte("----")
-	tableTag          = []byte("|")
+	tableColumnDivide = []byte("|")
+	tableRowDivide    = []byte("---")
 	h1Tag             = []byte("#")
 	h2Tag             = []byte("##")
 	h3Tag             = []byte("###")
@@ -73,11 +81,49 @@ func headingTagFromLevel(level int) []byte {
 	}
 }
 
+// Render prints out the whole document from the ast.
+func (r *MarkdownRenderer) ChangeStatus(ast *Node) []byte {
+	ast.Walk(func(node *Node, entering bool) WalkStatus {
+		return r.RenderNode(&r.w, node, entering)
+	})
+
+	return r.w.Bytes()
+}
+
+func (r *MarkdownRenderer) shouldReplaceNewStatus(node *Node) bool {
+	if node.Parent.Type != Heading && r.newHistory != nil && r.currentHeaderTitle == models.StatusHeader {
+		return true
+	}
+	return false
+}
+
+func (r *MarkdownRenderer) addNewHistory(w io.Writer) {
+	// History内のテーブルなら、rowにデータを追加
+	if r.newHistory != nil && r.currentHeaderTitle == models.HistoryHeader {
+		newRow := fmt.Sprintf(
+			"%s | %s | %s",
+			r.newHistory.Date,
+			r.newHistory.Status,
+			r.newHistory.Memo,
+		)
+		r.out(w, []byte(newRow))
+		r.cr(w)
+	}
+}
+
 // RenderNode is output a each single node
 func (r *MarkdownRenderer) RenderNode(w io.Writer, node *Node, entering bool) WalkStatus {
 	switch node.Type {
 	case Text:
-		r.out(w, node.Literal)
+		if r.shouldReplaceNewStatus(node) {
+			r.out(w, []byte(r.newHistory.Status))
+		} else {
+			r.out(w, node.Literal)
+		}
+		// そのときの直近のヘッダテキストを保存
+		if node.Parent.Type == Heading {
+			r.currentHeaderTitle = string(node.Literal)
+		}
 	case Softbreak:
 		break
 	case Hardbreak:
@@ -85,11 +131,7 @@ func (r *MarkdownRenderer) RenderNode(w io.Writer, node *Node, entering bool) Wa
 	case BlockQuote:
 		if entering {
 			r.out(w, quoteTag)
-			r.cr(w)
-		} else {
-			r.out(w, quoteTag)
-			r.cr(w)
-			r.cr(w)
+			w.Write(spaceBytes)
 		}
 	case CodeBlock:
 		r.out(w, []byte("```"))
@@ -173,33 +215,45 @@ func (r *MarkdownRenderer) RenderNode(w io.Writer, node *Node, entering bool) Wa
 	case Del:
 		r.out(w, strikethroughTag)
 	case Table:
+		r.firstTableCell = true
 		if !entering {
+			// ヘッダ数をリセット
+			r.tableHeadCount = 0
+			// 必要ならHistoryにRow追加
+			r.addNewHistory(w)
 			r.cr(w)
 		}
 	case TableCell:
-		if node.IsHeader {
-			r.out(w, tableTag)
-		} else {
-			if entering {
-				r.out(w, tableTag)
+		// ヘッダのCellが増えるごとにヘッダ数を増やす
+		if node.IsHeader && entering {
+			r.tableHeadCount++
+		}
+		if entering {
+			if r.firstTableCell {
+				r.firstTableCell = false
+			} else {
+				r.out(w, tableColumnDivide)
 			}
 		}
 	case TableHead:
+		if entering {
+			r.tableHeadCount = 0
+		} else {
+			for i := 1; i <= r.tableHeadCount; i++ {
+				r.out(w, tableRowDivide)
+				if i != r.tableHeadCount {
+					r.out(w, tableColumnDivide)
+				}
+			}
+			r.cr(w)
+		}
 		break
 	case TableBody:
 		break
 	case TableRow:
-		if node.Parent.Type == TableHead {
-			r.out(w, tableTag)
-
-			if !entering {
-				r.cr(w)
-			}
-		} else if node.Parent.Type == TableBody {
-			if !entering {
-				r.out(w, tableTag)
-				r.cr(w)
-			}
+		if !entering {
+			r.firstTableCell = true
+			r.cr(w)
 		}
 	case HTMLSpan:
 		r.out(w, node.Literal)
@@ -233,5 +287,15 @@ func MarkdownRun(input []byte, opts ...Option) []byte {
 	optList = append(optList, opts...)
 	parser := New(optList...)
 	ast := parser.Parse([]byte(input))
+	return r.Render(ast)
+}
+
+func StatusChange(input []byte, history *models.History, opts ...Option) []byte {
+	r := &MarkdownRenderer{newHistory: history}
+	optList := []Option{WithRenderer(r), WithExtensions(CommonExtensions)}
+	optList = append(optList, opts...)
+	parser := New(optList...)
+	ast := parser.Parse([]byte(input))
+
 	return r.Render(ast)
 }
